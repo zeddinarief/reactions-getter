@@ -1,13 +1,16 @@
+import re
 from sqlite3 import Timestamp
 import slack
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from flask import Flask, request, Response
+from flask import Flask, request, Response,jsonify
 from slackeventsapi import SlackEventAdapter
 import string
 from datetime import datetime, timedelta
 import time
+import requests
+from markupsafe import escape
 
 load_dotenv()
 
@@ -20,6 +23,7 @@ BOT_ID = client.api_call("auth.test")['user_id']
 
 reaction_messages = {}
 
+
 class ReactionMessage:
     START_TEXT = {
         'type': 'section',
@@ -30,7 +34,7 @@ class ReactionMessage:
             )
         }
     }
-    
+
     START_REACTION = {
         'type': 'section',
         'text': {
@@ -69,9 +73,10 @@ class ReactionMessage:
         return {'type': 'section', 'text': {'type': 'mrkdwn', 'text': self.text}}
 
     def _get_reaction_task(self):
-        reactions = client.reactions_get(channel=self.channel, timestamp=self.thread_ts)
+        reactions = client.reactions_get(
+            channel=self.channel,full=True, timestamp=self.thread_ts)
         get_reaction_messages = reactions.get('message')
-        
+
         if 'reactions' in get_reaction_messages:
             text = ''
             for reaction in get_reaction_messages['reactions']:
@@ -83,10 +88,12 @@ class ReactionMessage:
         else:
             return {'type': 'section', 'text': {'type': 'mrkdwn', 'text': 'No reactions'}}
 
+
 def send_reaction_message(event):
     channel = event.get('channel')
     user = event.get('user')
     ts = event.get('ts')
+    
     if f'@{user}' not in reaction_messages:
         reaction_messages[f'@{user}'] = {}
         reaction_messages[f'@{user}'][channel] = {}
@@ -102,8 +109,8 @@ def send_reaction_message(event):
     reaction.user_dm = response['channel']
 
     reaction_messages[f'@{user}'][channel][ts] = reaction
-    print(reaction_messages)
     return
+
 
 @ slack_event_adapter.on('reaction_added')
 def reaction(payload):
@@ -111,9 +118,8 @@ def reaction(payload):
     channel_id = event.get('item', {}).get('channel')
     user_id = event.get('item_user')
     ts = event.get('item', {}).get('ts')
-
     if f'@{user_id}' not in reaction_messages:
-            return
+        return
     else:
         if channel_id not in reaction_messages[f'@{user_id}']:
             return
@@ -123,8 +129,10 @@ def reaction(payload):
 
     reaction = reaction_messages[f'@{user_id}'][channel_id][ts]
     message = reaction.get_message()
+
     updated_message = client.chat_update(**message)
     reaction.timestamp = updated_message['ts']
+
 
 @ slack_event_adapter.on('reaction_removed')
 def reaction_removed(payload):
@@ -134,7 +142,7 @@ def reaction_removed(payload):
     ts = event.get('item', {}).get('ts')
 
     if f'@{user_id}' not in reaction_messages:
-            return
+        return
     else:
         if channel_id not in reaction_messages[f'@{user_id}']:
             return
@@ -146,6 +154,7 @@ def reaction_removed(payload):
     message = reaction.get_message()
     updated_message = client.chat_update(**message)
     reaction.timestamp = updated_message['ts']
+
 
 @ slack_event_adapter.on('app_mention')
 def mention(payload):
@@ -164,5 +173,25 @@ def mention(payload):
                 if ts not in reaction_messages[f'@{user_id}'][channel_id]:
                     send_reaction_message(event)
 
+@app.route('/reaction/channelid/<channelId>/timestamp/<timestamp>')
+def getReaction(channelId,timestamp):
+    req = client.reactions_get(
+            channel=channelId,full=True, timestamp=timestamp)
+    get_reaction_messages = req.get('message')
+    reactions = get_reaction_messages['reactions']
+    data_list=[]
+    for reaction in reactions:
+        data = {}
+        user_names=[]
+        data['count'] = reaction.get('count')
+        data['reaction_names'] = reaction.get('name')
+        for user in reaction.get('users'):
+            req = client.users_info(user=user)
+            user_names.append(req['user']['profile']['real_name'])
+        data['user'] = user_names   
+        data_list.append(data)
+    print(data_list)
+    return jsonify(data_list)
+
 if __name__ == "__main__":
-    app.run(debug=True, host='0.0.0.0')
+    app.run(debug=True, host='localhost', port=5555)
