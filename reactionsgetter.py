@@ -1,4 +1,3 @@
-import re
 from sqlite3 import Timestamp
 import slack
 import os
