@@ -8,7 +8,6 @@ from slackeventsapi import SlackEventAdapter
 import string
 from datetime import datetime, timedelta
 import time
-import requests
 from markupsafe import escape
 
 load_dotenv()
